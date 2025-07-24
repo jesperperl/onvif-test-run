@@ -265,10 +265,13 @@ class ONVIFController:
 def main():
     """Example usage"""
     # Camera configuration
-    CAMERA_IP = "192.168.0.252"  # Replace with your camera IP
-    CAMERA_PORT = 2020           # Replace with your camera port
-    USERNAME = "username"        # Replace with your username
-    PASSWORD = "password"        # Replace with your password
+    # CAMERA_IP = "192.168.0.252"  # Replace with your camera IP
+    # CAMERA_PORT = 2020           # Replace with your camera port
+    CAMERA_IP = "localhost"  # Replace with your camera IP
+    # CAMERA_PORT = 8000           # Replace with your camera port
+    CAMERA_PORT = 8080           # Replace with your camera port
+    USERNAME = "user"        # Replace with your username
+    PASSWORD = "user123"        # Replace with your password
 
     # Create ONVIF controller
     controller = ONVIFController(CAMERA_IP, CAMERA_PORT, USERNAME, PASSWORD)

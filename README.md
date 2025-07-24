@@ -47,3 +47,30 @@ Save screenshot with 's' and quit stream with 'q'
 ```bash
 ./rtsp_screenshot rtsp://userid:password@192.168.0.252:554/stream1 --display
 ```
+
+### Onvif server
+
+#### C++
+
+```bash
+g++ -std=c++11 -pthread -o onvif_server onvif_server.cpp
+./onvif_server
+```
+
+Access services at:
+
+* Device Service: http://localhost:8080/onvif/device_service
+* Media Service: http://localhost:8080/onvif/media_service
+* PTZ Service: http://localhost:8080/onvif/ptz_service
+
+#### Python
+
+```bash
+uv sync
+uv run python onvif_server.py
+```
+
+Available endpoints:
+* Device Service: http://localhost:8000/onvif/device_service
+* Media Service: http://localhost:8000/onvif/media_service
+* PTZ Service: http://localhost:8000/onvif/ptz_service

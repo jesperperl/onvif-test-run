@@ -55,7 +55,7 @@ def generate_current_timestamp() -> str:
     Returns:
         ISO 8601 formatted timestamp string
     """
-    return datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
+    return datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.000Z')
 
 
 def generate_nonce() -> str:
@@ -81,7 +81,7 @@ def main():
     # Example with hardcoded values
     print("\n1. Example with sample values:")
     sample_nonce = "MTIzNDU2Nzg5MDEyMzQ1Ng=="  # Base64 of "1234567890123456"
-    sample_date = "2024-01-15T10:30:00Z"
+    sample_date = "2024-01-15T10:30:00.000Z"
     sample_password = "admin123"
 
     sample_digest = compute_onvif_digest(sample_nonce, sample_date, sample_password)

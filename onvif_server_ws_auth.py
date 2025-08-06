@@ -1,5 +1,5 @@
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import Response
+from fastapi.responses import Response, JSONResponse
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone, timedelta
 import uuid
@@ -77,7 +77,7 @@ def create_password_digest(username: str, password: str, nonce: str, created: st
     """Create WS-Security password digest"""
     # Decode base64 nonce
     nonce_bytes = base64.b64decode(nonce)
-    
+
     # Create digest: Base64(SHA1(nonce + created + password))
     digest_input = nonce_bytes + created.encode('utf-8') + password.encode('utf-8')
     digest = hashlib.sha1(digest_input).digest()
@@ -87,35 +87,35 @@ def verify_wsse_credentials(security_header) -> Optional[str]:
     """Verify WS-Security username token credentials"""
     if security_header is None:
         return None
-    
+
     try:
         # Extract username token elements
         username_token = security_header.find('.//{http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd}UsernameToken')
         if username_token is None:
             return None
-            
+
         username_elem = username_token.find('.//{http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd}Username')
         password_elem = username_token.find('.//{http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd}Password')
         nonce_elem = username_token.find('.//{http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd}Nonce')
         created_elem = username_token.find('.//{http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd}Created')
-        
+
         if not all([username_elem, password_elem]):
             return None
-            
+
         username = username_elem.text
         password_digest = password_elem.text
         password_type = password_elem.get('Type', '')
-        
+
         if username not in USERS:
             return None
-            
+
         user_password = USERS[username]['password']
-        
+
         # Check if it's digest authentication
         if 'PasswordDigest' in password_type and nonce_elem is not None and created_elem is not None:
             nonce = nonce_elem.text
             created = created_elem.text
-            
+
             # Verify timestamp (should be within 5 minutes)
             try:
                 created_time = datetime.fromisoformat(created.replace('Z', '+00:00'))
@@ -124,31 +124,31 @@ def verify_wsse_credentials(security_header) -> Optional[str]:
                     return None
             except ValueError:
                 return None
-            
+
             # Calculate expected digest
             expected_digest = create_password_digest(username, user_password, nonce, created)
-            
+
             if password_digest == expected_digest:
                 return username
-        
+
         # Check if it's plain text password (less secure but supported)
         elif 'PasswordText' in password_type or not password_type:
             if password_digest == user_password:
                 return username
-    
+
     except Exception:
         pass
-    
+
     return None
 
 def authenticate_request(xml_content: str) -> Optional[str]:
     """Authenticate ONVIF request using WS-Security"""
     try:
         root = ET.fromstring(xml_content)
-        
+
         # Find security header
         security_header = root.find('.//{http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd}Security')
-        
+
         return verify_wsse_credentials(security_header)
     except ET.ParseError:
         return None
@@ -170,30 +170,21 @@ def create_soap_fault(fault_code: str, fault_string: str) -> str:
 </soap:Envelope>'''
 
 
-def create_soap_response(body_content: str, action: str = None) -> str:
-    """Parse SOAP request to extract action and parameters"""
-    try:
-        root = ET.fromstring(xml_content)
-        
-        # Find the action in the body
-        body = root.find('.//{http://www.w3.org/2003/05/soap-envelope}Body')
-        if body is not None:
-            for child in body:
-                return {
-                    'action': child.tag.split('}')[-1] if '}' in child.tag else child.tag,
-                    'namespace': child.tag.split('}')[0][1:] if '}' in child.tag else '',
-                    'element': child
-                }
-    except ET.ParseError:
-        pass
-    
-    return {'action': None, 'namespace': '', 'element': None}
+def create_soap_response(body_content: str) -> str:
+    """Create SOAP response"""
+    return f'''<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope" xmlns:tds="http://www.onvif.org/ver10/device/wsdl" xmlns:tt="http://www.onvif.org/ver10/schema">
+    <soap:Body>
+{body_content}
+    </soap:Body>
+</soap:Envelope>'''
 
 def parse_soap_request(xml_content: str) -> Dict[str, Any]:
     """Parse SOAP request to extract action and parameters"""
     try:
+        print(xml_content)
         root = ET.fromstring(xml_content)
-        
+
         # Find the action in the body
         body = root.find('.//{http://www.w3.org/2003/05/soap-envelope}Body')
         if body is not None:
@@ -204,8 +195,9 @@ def parse_soap_request(xml_content: str) -> Dict[str, Any]:
                     'element': child
                 }
     except ET.ParseError:
+        print(ET)
         pass
-    
+
     return {'action': None, 'namespace': '', 'element': None}
 # Device Management Service
 @app.post("/onvif/device_service")
@@ -213,17 +205,17 @@ async def device_service(request: Request):
     """Handle Device Management Service requests"""
     xml_content = await request.body()
     xml_str = xml_content.decode('utf-8')
-    
+
     # Authenticate request
-    user = authenticate_request(xml_str)
-    if user is None:
-        fault_response = create_soap_fault("Sender", "Authentication failed")
-        return Response(content=fault_response, media_type="application/soap+xml", status_code=401)
-    
+    # user = authenticate_request(xml_str)
+    # if user is None:
+    #     fault_response = create_soap_fault("Sender", "Authentication failed")
+    #     return Response(content=fault_response, media_type="application/soap+xml", status_code=401)
+
     soap_request = parse_soap_request(xml_str)
-    
+
     action = soap_request['action']
-    
+
     if action == 'GetDeviceInformation':
         body_content = f'''
         <tds:GetDeviceInformationResponse>
@@ -233,7 +225,7 @@ async def device_service(request: Request):
             <tds:SerialNumber>{DEVICE_CONFIG['serial_number']}</tds:SerialNumber>
             <tds:HardwareId>{DEVICE_CONFIG['hardware_id']}</tds:HardwareId>
         </tds:GetDeviceInformationResponse>'''
-        
+
     elif action == 'GetCapabilities':
         body_content = '''
         <tds:GetCapabilitiesResponse>
@@ -282,7 +274,7 @@ async def device_service(request: Request):
                 </tt:PTZ>
             </tds:Capabilities>
         </tds:GetCapabilitiesResponse>'''
-        
+
     elif action == 'GetServices':
         body_content = '''
         <tds:GetServicesResponse>
@@ -311,7 +303,7 @@ async def device_service(request: Request):
                 </tds:Version>
             </tds:Service>
         </tds:GetServicesResponse>'''
-        
+
     elif action == 'GetSystemDateAndTime':
         current_time = datetime.now(timezone.utc)
         body_content = f'''
@@ -336,12 +328,14 @@ async def device_service(request: Request):
                 </tt:UTCDateTime>
             </tds:SystemDateAndTime>
         </tds:GetSystemDateAndTimeResponse>'''
-    
+
     else:
         raise HTTPException(status_code=400, detail=f"Unsupported action: {action}")
-    
+
+    print(body_content)
+
     response_xml = create_soap_response(body_content)
-    return Response(content=response_xml, media_type="application/soap+xml")
+    return JSONResponse(status_code=200, content=response_xml, media_type="application/soap+xml")
 
 # Media Service
 @app.post("/onvif/media_service")
@@ -349,17 +343,17 @@ async def media_service(request: Request):
     """Handle Media Service requests"""
     xml_content = await request.body()
     xml_str = xml_content.decode('utf-8')
-    
+
     # Authenticate request
     user = authenticate_request(xml_str)
     if user is None:
         fault_response = create_soap_fault("Sender", "Authentication failed")
         return Response(content=fault_response, media_type="application/soap+xml", status_code=401)
-    
+
     soap_request = parse_soap_request(xml_str)
-    
+
     action = soap_request['action']
-    
+
     if action == 'GetProfiles':
         profiles_xml = ''
         for profile_token, profile_data in MEDIA_PROFILES.items():
@@ -388,7 +382,7 @@ async def media_service(request: Request):
                         <tt:BitrateLimit>{video_config['bitrate']}</tt:BitrateLimit>
                     </tt:RateControl>
                 </tt:VideoEncoderConfiguration>'''
-            
+
             if 'audio_encoder' in profile_data:
                 audio_config = profile_data['audio_encoder']
                 profiles_xml += f'''
@@ -399,15 +393,15 @@ async def media_service(request: Request):
                     <tt:Bitrate>{audio_config['bitrate']}</tt:Bitrate>
                     <tt:SampleRate>{audio_config['sample_rate']}</tt:SampleRate>
                 </tt:AudioEncoderConfiguration>'''
-            
+
             profiles_xml += '''
             </trt:Profiles>'''
-        
+
         body_content = f'''
         <trt:GetProfilesResponse>
             {profiles_xml}
         </trt:GetProfilesResponse>'''
-        
+
     elif action == 'GetStreamUri':
         # Extract profile token from request
         element = soap_request['element']
@@ -416,12 +410,12 @@ async def media_service(request: Request):
             profile_ref = element.find('.//{http://www.onvif.org/ver10/media/wsdl}ProfileToken')
             if profile_ref is not None:
                 profile_token = profile_ref.text
-        
+
         if not profile_token or profile_token not in MEDIA_PROFILES:
             profile_token = 'Profile_1'  # Default profile
-        
+
         stream_uri = f"rtsp://localhost:554/stream/{profile_token}"
-        
+
         body_content = f'''
         <trt:GetStreamUriResponse>
             <trt:MediaUri>
@@ -431,7 +425,7 @@ async def media_service(request: Request):
                 <tt:Timeout>PT30S</tt:Timeout>
             </trt:MediaUri>
         </trt:GetStreamUriResponse>'''
-        
+
     elif action == 'GetVideoSources':
         body_content = '''
         <trt:GetVideoSourcesResponse>
@@ -443,10 +437,10 @@ async def media_service(request: Request):
                 </tt:Resolution>
             </trt:VideoSources>
         </trt:GetVideoSourcesResponse>'''
-    
+
     else:
         raise HTTPException(status_code=400, detail=f"Unsupported action: {action}")
-    
+
     response_xml = create_soap_response(body_content)
     return Response(content=response_xml, media_type="application/soap+xml")
 
@@ -456,17 +450,17 @@ async def ptz_service(request: Request):
     """Handle PTZ Service requests"""
     xml_content = await request.body()
     xml_str = xml_content.decode('utf-8')
-    
+
     # Authenticate request
     user = authenticate_request(xml_str)
     if user is None:
         fault_response = create_soap_fault("Sender", "Authentication failed")
         return Response(content=fault_response, media_type="application/soap+xml", status_code=401)
-    
+
     soap_request = parse_soap_request(xml_str)
-    
+
     action = soap_request['action']
-    
+
     if action == 'GetConfigurations':
         body_content = '''
         <tptz:GetConfigurationsResponse>
@@ -487,7 +481,7 @@ async def ptz_service(request: Request):
                 <tt:DefaultPTZTimeout>PT5S</tt:DefaultPTZTimeout>
             </tptz:PTZConfiguration>
         </tptz:GetConfigurationsResponse>'''
-        
+
     elif action == 'GetNodes':
         body_content = '''
         <tptz:GetNodesResponse>
@@ -517,7 +511,7 @@ async def ptz_service(request: Request):
                 <tt:HomeSupported>true</tt:HomeSupported>
             </tptz:PTZNode>
         </tptz:GetNodesResponse>'''
-        
+
     elif action == 'GetStatus':
         body_content = '''
         <tptz:GetStatusResponse>
@@ -533,30 +527,30 @@ async def ptz_service(request: Request):
                 <tt:UtcTime>2024-01-01T00:00:00Z</tt:UtcTime>
             </tptz:PTZStatus>
         </tptz:GetStatusResponse>'''
-        
+
     elif action == 'AbsoluteMove':
         body_content = '''
         <tptz:AbsoluteMoveResponse>
         </tptz:AbsoluteMoveResponse>'''
-        
+
     elif action == 'RelativeMove':
         body_content = '''
         <tptz:RelativeMoveResponse>
         </tptz:RelativeMoveResponse>'''
-        
+
     elif action == 'ContinuousMove':
         body_content = '''
         <tptz:ContinuousMoveResponse>
         </tptz:ContinuousMoveResponse>'''
-        
+
     elif action == 'Stop':
         body_content = '''
         <tptz:StopResponse>
         </tptz:StopResponse>'''
-    
+
     else:
         raise HTTPException(status_code=400, detail=f"Unsupported action: {action}")
-    
+
     response_xml = create_soap_response(body_content)
     return Response(content=response_xml, media_type="application/soap+xml")
 
@@ -588,7 +582,7 @@ async def device_service_wsdl():
         </port>
     </service>
 </definitions>'''
-    
+
     return Response(content=wsdl_content, media_type="text/xml")
 
 # Health check endpoint
@@ -606,7 +600,7 @@ async def root():
         "version": "1.0.0",
         "endpoints": {
             "device_service": "/onvif/device_service",
-            "media_service": "/onvif/media_service", 
+            "media_service": "/onvif/media_service",
             "ptz_service": "/onvif/ptz_service"
         },
         "authentication": "HTTP Basic Auth required",
@@ -626,5 +620,5 @@ if __name__ == "__main__":
     print("  Device Service: http://localhost:8000/onvif/device_service")
     print("  Media Service: http://localhost:8000/onvif/media_service")
     print("  PTZ Service: http://localhost:8000/onvif/ptz_service")
-    
+
     uvicorn.run(app, host="0.0.0.0", port=8000)
